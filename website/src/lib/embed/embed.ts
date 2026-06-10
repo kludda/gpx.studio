@@ -29,6 +29,44 @@ type Entry = { hostId: string; version?: number };
 const registry = new Map<string, Entry>();
 const localByHost = () => new Map([...registry].map(([l, e]) => [e.hostId, l]));
 
+// The registry must survive an iframe/bridge reload so promoted (server-backed)
+// files keep their localId↔hostId binding — otherwise they'd lose autosave/status
+// and a re-`load` from the host would create a duplicate gpx-N instead of
+// re-attaching. Dexie itself persists by design; we mirror the mapping into
+// localStorage (durable + shared across same-origin tabs, like the shared DB).
+const REGISTRY_KEY = 'gpxstudio:embed:registry';
+
+function persistRegistry() {
+    try {
+        localStorage.setItem(REGISTRY_KEY, JSON.stringify([...registry]));
+    } catch {
+        /* storage unavailable/full — non-fatal */
+    }
+}
+
+async function restoreRegistry() {
+    let stored: [string, Entry][];
+    try {
+        stored = JSON.parse(localStorage.getItem(REGISTRY_KEY) ?? '[]');
+    } catch {
+        return;
+    }
+    if (!Array.isArray(stored) || stored.length === 0) return;
+    // Only keep entries whose file still exists in Dexie (it may have been
+    // deleted from another tab while this one was gone).
+    const liveIds = new Set(await db.fileids.toArray());
+    let changed = false;
+    for (const [localId, entry] of stored) {
+        if (entry && typeof entry.hostId === 'string' && liveIds.has(localId)) {
+            registry.set(localId, entry);
+            setStatus(localId, 'saved'); // server-backed → reflect synced state
+        } else {
+            changed = true; // dropped a stale entry
+        }
+    }
+    if (changed) persistRegistry();
+}
+
 // Guard so direct-to-Dexie inbound writes never trigger an outbound autosave.
 let applyingRemote = false;
 
@@ -71,6 +109,7 @@ async function applyIncoming(hostId: string, data: string, title?: string) {
         if (!localId) {
             localId = getFileIds(1)[0];
             registry.set(localId, { hostId });
+            persistRegistry();
         }
         file._data.id = localId;
 
@@ -98,6 +137,7 @@ async function removeIncoming(hostId: string) {
         applyingRemote = false;
     }
     registry.delete(localId);
+    persistRegistry();
     clearStatus(localId);
 }
 
@@ -131,13 +171,16 @@ function onCommit(updated: string[], deleted: string[]) {
     }
     // A local delete of a server-backed file: drop its registry entry. (The host
     // is not asked to delete in this POC — deletion is host-driven via removeFile.)
+    let registryChanged = false;
     for (const id of deleted) {
         if (registry.has(id)) {
             registry.delete(id);
             clearStatus(id);
             pending.delete(id);
+            registryChanged = true;
         }
     }
+    if (registryChanged) persistRegistry();
     if (scheduled) {
         clearTimeout(timer);
         timer = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
@@ -191,7 +234,10 @@ async function handleAction(m: Record<string, any>) {
             const localId = localByHost().get(m.id);
             if (localId) {
                 const entry = registry.get(localId);
-                if (entry) entry.version = m.version;
+                if (entry) {
+                    entry.version = m.version;
+                    persistRegistry();
+                }
                 setStatus(localId, 'saved');
             }
             break;
@@ -201,6 +247,7 @@ async function handleAction(m: Record<string, any>) {
             break;
         case 'assignId':
             registry.set(m.tempId, { hostId: m.id });
+            persistRegistry();
             setStatus(m.tempId, 'saved');
             break;
         case 'configure':
@@ -223,14 +270,11 @@ export async function initEmbed() {
     if (started || !isEmbedded()) return;
     started = true;
 
-    // The editor owns no files: start each embed session from a clean document
-    // so the host is the single source of truth (in-memory registry is fresh too).
-    await db.transaction('rw', db.files, db.fileids, db.patches, async () => {
-        await db.files.clear();
-        await db.fileids.clear();
-        await db.patches.clear();
-    });
-    db.settings.put(-1, 'patchIndex');
+    // Dexie persists by design (browser-local files stay until promoted). Restore
+    // the localId↔hostId registry so server-backed files keep their host binding
+    // across a reload — must run before we accept inbound messages so re-`load`s
+    // re-attach to the existing gpx-N instead of creating duplicates.
+    await restoreRegistry();
 
     onLocalCommit(onCommit);
 
