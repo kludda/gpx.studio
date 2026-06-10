@@ -38,6 +38,7 @@
         ClipboardPaste,
         PaintBucket,
         FolderOpen,
+        CloudUpload,
         FileStack,
         FileX,
         BookOpenText,
@@ -70,6 +71,8 @@
     import { fileStateCollection } from '$lib/logic/file-state';
     import { fileActionManager } from '$lib/logic/file-action-manager';
     import { copied, selection } from '$lib/logic/selection';
+    import { isEmbedded, saveToServer } from '$lib/embed/embed';
+    import { syncStatus } from '$lib/embed/status';
     import { allHidden } from '$lib/logic/hidden';
     import { boundsManager } from '$lib/logic/bounds';
     import { tick, onMount } from 'svelte';
@@ -108,6 +111,19 @@
 
     let layerSettingsOpen = $state(false);
     let fullscreen = $state(false);
+
+    // Embed mode: "Save to server" promotes the single selected browser-only file.
+    let embedded = isEmbedded();
+    let selectedFileId = $derived.by(() => {
+        if ($selection.size !== 1) return undefined;
+        const item = $selection.getSelected()[0];
+        return item instanceof ListFileItem ? item.getFileId() : undefined;
+    });
+    // Already server-backed files carry a sync status; browser-only files don't.
+    let canPromote = $derived(
+        selectedFileId !== undefined &&
+            ($syncStatus.get(selectedFileId) ?? 'local') === 'local'
+    );
 
     function toggleFullscreen() {
         if (!document.fullscreenElement) {
@@ -152,6 +168,15 @@
                         {i18n._('menu.open')}
                         <Shortcut key="O" ctrl={true} />
                     </Menubar.Item>
+                    {#if embedded}
+                        <Menubar.Item
+                            disabled={!canPromote}
+                            onclick={() => selectedFileId && saveToServer(selectedFileId)}
+                        >
+                            <CloudUpload size="16" />
+                            Save to server
+                        </Menubar.Item>
+                    {/if}
                     <Menubar.Separator />
                     <Menubar.Item
                         onclick={fileActions.duplicateSelection}

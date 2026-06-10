@@ -15,6 +15,19 @@ import { selection } from '$lib/logic/selection';
 
 const MAX_PATCHES = 100;
 
+// Embed mode tap point: a single listener notified after each local commit has
+// been persisted. Used by `$lib/embed` to autosave server-backed files back to
+// the host. Null (and inert) when not embedded — standalone behaviour unchanged.
+type CommitListener = (
+    updatedFileIds: string[],
+    deletedFileIds: string[],
+    newFiles: ReadonlyMap<string, GPXFile>
+) => void;
+let commitListener: CommitListener | null = null;
+export function onLocalCommit(fn: CommitListener | null) {
+    commitListener = fn;
+}
+
 export class FileActionManager {
     private _db: Database;
     private _files: Map<string, GPXFile>;
@@ -152,7 +165,7 @@ export class FileActionManager {
         selection.updateFiles(updatedFiles, deletedFileIds);
 
         // @ts-ignore
-        return this._db.transaction('rw', this._db.fileids, this._db.files, async () => {
+        const tx = this._db.transaction('rw', this._db.fileids, this._db.files, async () => {
             if (updatedFileIds.length > 0) {
                 await this._db.fileids.bulkPut(updatedFileIds, updatedFileIds);
                 await this._db.files.bulkPut(updatedFiles, updatedFileIds);
@@ -162,6 +175,10 @@ export class FileActionManager {
                 await this._db.files.bulkDelete(deletedFileIds);
             }
         });
+        if (commitListener) {
+            tx.then(() => commitListener?.(updatedFileIds, deletedFileIds, newFiles));
+        }
+        return tx;
     }
 
     applyGlobal(callback: (files: Map<string, GPXFile>) => void) {

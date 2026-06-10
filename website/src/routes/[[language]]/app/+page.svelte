@@ -20,6 +20,7 @@
     import { getURLForGoogleDriveFile } from '$lib/components/embedding/embedding';
     import { db } from '$lib/db';
     import { fileStateCollection } from '$lib/logic/file-state';
+    import { initEmbed, isEmbedded } from '$lib/embed/embed';
 
     const {
         treeFileView,
@@ -38,6 +39,12 @@
     onMount(async () => {
         settings.connectToDatabase(db);
         fileStateCollection.connectToDatabase(db).then(() => {
+            // Embed mode: the host owns files and pushes them over postMessage.
+            // Skip the standalone URL-param file loading.
+            if (isEmbedded()) {
+                initEmbed();
+                return;
+            }
             let files: string[] = JSON.parse(page.url.searchParams.get('files') || '[]');
             let ids: string[] = JSON.parse(page.url.searchParams.get('ids') || '[]');
             let urls: string[] = files.concat(ids.map(getURLForGoogleDriveFile));
