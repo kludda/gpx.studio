@@ -5,6 +5,7 @@
     import { page } from '$app/state';
     import { map } from '$lib/components/map/map';
     import { PUBLIC_MAPTILER_KEY } from '$env/static/public';
+    import { isEmbedded } from '$lib/embed/embed';
 
     let {
         maptilerKey = PUBLIC_MAPTILER_KEY,
@@ -29,7 +30,7 @@
             webgl2Supported = false;
             return;
         }
-        if (window.top !== window.self && !page.route.id?.includes('embed')) {
+        if (window.top !== window.self && !page.route.id?.includes('embed') && !isEmbedded()) {
             embeddedApp = true;
             return;
         }
