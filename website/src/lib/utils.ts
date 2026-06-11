@@ -12,6 +12,10 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
+// [embed] tiles endpoint made configurable via env (VITE_TILES_URL).
+// Falls back to the upstream default so standalone behavior is unchanged. See .env.
+const TILES_URL = import.meta.env.VITE_TILES_URL || 'https://tiles.gpx.studio';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WithoutChild<T> = T extends { child?: any } ? Omit<T, 'child'> : T;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,7 +125,7 @@ export function getElevation(
     };
 
     let promises = uniqueTiles.map((tile) =>
-        fetch(`https://tiles.gpx.studio/mapterhorn/${ELEVATION_ZOOM}/${tile[0]}/${tile[1]}.webp`, {
+        fetch(`${TILES_URL}/mapterhorn/${ELEVATION_ZOOM}/${tile[0]}/${tile[1]}.webp`, { // [embed] was 'https://tiles.gpx.studio/mapterhorn/...'
             cache: 'force-cache',
         })
             .then((response) => response.blob())

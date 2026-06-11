@@ -10,6 +10,9 @@ export default defineConfig({
     server: {
         port: 5180,
         strictPort: true,
+        // [embed] Allow the reverse-proxied host (gpxstudio.eel.se) through Vite's host check.
+        // Leading dot = the domain and all its subdomains.
+        allowedHosts: ['.eel.se'],
     },
     ssr: {
         noExternal: ['gpx'],

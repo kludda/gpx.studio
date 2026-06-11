@@ -13,6 +13,10 @@ import { loadSVGIcon } from '$lib/utils';
 
 const { currentOverpassQueries } = settings;
 
+// [embed] Overpass endpoint made configurable via env (VITE_OVERPASS_URL).
+// Falls back to the upstream default so standalone behavior is unchanged. See .env.
+const OVERPASS_URL = import.meta.env.VITE_OVERPASS_URL || 'https://overpass.gpx.studio';
+
 const mercator = new SphericalMercator({
     size: 256,
 });
@@ -24,7 +28,7 @@ liveQuery(() => db.overpassdata.toArray()).subscribe((pois) => {
 });
 
 export class OverpassLayer {
-    overpassUrl = 'https://overpass.gpx.studio/api/interpreter';
+    overpassUrl = `${OVERPASS_URL}/api/interpreter`; // [embed] was 'https://overpass.gpx.studio/api/interpreter'
     minZoom = 12;
     queryZoom = 12;
     expirationTime = 7 * 24 * 3600 * 1000;
