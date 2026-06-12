@@ -196,8 +196,10 @@ export function saveToServer(localId: string) {
     if (!file) return;
     setStatus(localId, 'saving');
     const name = file.metadata?.name?.trim();
+    // Promotion is just a save of a file the host hasn't seen: no `id` yet, so we
+    // carry `tempId` (this localId) — the host creates and binds it back via `status`.
     post({
-        event: 'saveToHost',
+        event: 'save',
         tempId: localId,
         data: buildGPX(file, []),
         name: name ? `${name}.gpx` : 'untitled.gpx',
@@ -234,25 +236,19 @@ async function handleAction(m: Record<string, any>) {
         case 'status': {
             // Host's ack of a write outcome (draw.io-style single status channel).
             // `ok:true` carries the new version; `ok:false` carries a message.
-            const localId = localByHost().get(m.id);
+            // On a promotion ack the host also sends `tempId` (no binding exists yet),
+            // so we key on that and adopt the binding here — folding in the old assignId.
+            const localId = m.tempId ?? localByHost().get(m.id);
             if (!localId) break;
             if (m.ok) {
-                const entry = registry.get(localId);
-                if (entry) {
-                    entry.version = m.version;
-                    persistRegistry();
-                }
+                registry.set(localId, { hostId: m.id, version: m.version });
+                persistRegistry();
                 setStatus(localId, 'saved');
             } else {
                 setStatus(localId, 'error');
             }
             break;
         }
-        case 'assignId':
-            registry.set(m.tempId, { hostId: m.id });
-            persistRegistry();
-            setStatus(m.tempId, 'saved');
-            break;
     }
 }
 
