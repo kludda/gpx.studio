@@ -93,7 +93,7 @@ function post(msg: Record<string, unknown>) {
 }
 
 // --------------------------------------------------------------------------- //
-// Inbound: load / addFile / merge — write straight to Dexie (echo-free).
+// Inbound: load / merge — write straight to Dexie (echo-free).
 // liveQuery in fileStateCollection picks the write up and renders it.
 // --------------------------------------------------------------------------- //
 async function applyIncoming(hostId: string, data: string, title?: string) {
@@ -213,10 +213,11 @@ export function isServerBacked(localId: string): boolean {
 // --------------------------------------------------------------------------- //
 async function handleAction(m: Record<string, any>) {
     switch (m.action) {
-        case 'load':
-        case 'addFile': {
+        case 'load': {
+            // Single inbound-open action (multi-file): every loaded file is
+            // selected/activated — preferred UX over silently adding in the bg.
             const localId = await applyIncoming(m.id, m.data, m.title);
-            if (m.action === 'load' && localId) {
+            if (localId) {
                 selection.selectFileWhenLoaded(localId);
             }
             post({ event: 'load', id: m.id });
