@@ -170,7 +170,7 @@ function onCommit(updated: string[], deleted: string[]) {
         }
     }
     // A local delete of a server-backed file: drop its registry entry. (The host
-    // is not asked to delete in this POC — deletion is host-driven via removeFile.)
+    // is not asked to delete in this POC — deletion is host-driven via remove.)
     let registryChanged = false;
     for (const id of deleted) {
         if (registry.has(id)) {
@@ -228,7 +228,7 @@ async function handleAction(m: Record<string, any>) {
             // so replacing an already-open file preserves the map viewport.
             await applyIncoming(m.id, m.data, m.title);
             break;
-        case 'removeFile':
+        case 'remove':
             await removeIncoming(m.id);
             break;
         case 'status': {
