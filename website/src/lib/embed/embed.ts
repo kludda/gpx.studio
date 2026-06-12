@@ -230,21 +230,23 @@ async function handleAction(m: Record<string, any>) {
         case 'removeFile':
             await removeIncoming(m.id);
             break;
-        case 'saved': {
+        case 'status': {
+            // Host's ack of a write outcome (draw.io-style single status channel).
+            // `ok:true` carries the new version; `ok:false` carries a message.
             const localId = localByHost().get(m.id);
-            if (localId) {
+            if (!localId) break;
+            if (m.ok) {
                 const entry = registry.get(localId);
                 if (entry) {
                     entry.version = m.version;
                     persistRegistry();
                 }
                 setStatus(localId, 'saved');
+            } else {
+                setStatus(localId, 'error');
             }
             break;
         }
-        case 'error':
-            setStatus(localByHost().get(m.id), 'error');
-            break;
         case 'assignId':
             registry.set(m.tempId, { hostId: m.id });
             persistRegistry();
