@@ -252,9 +252,6 @@ async function handleAction(m: Record<string, any>) {
             persistRegistry();
             setStatus(m.tempId, 'saved');
             break;
-        case 'configure':
-            // Optional pre-init config (units/theme). Not used in the POC.
-            break;
     }
 }
 
