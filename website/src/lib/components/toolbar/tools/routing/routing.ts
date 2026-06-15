@@ -6,10 +6,6 @@ import { get } from 'svelte/store';
 
 const { routing, routingProfile, privateRoads } = settings;
 
-// [embed] GraphHopper endpoint made configurable via env (VITE_GRAPHHOPPER_URL).
-// Falls back to the upstream default so standalone behavior is unchanged. See .env.
-const GRAPHHOPPER_URL = import.meta.env.VITE_GRAPHHOPPER_URL || 'https://graphhopper.gpx.studio';
-
 export type RoutingProfile = {
     engine: 'graphhopper' | 'brouter';
     profile: string;
@@ -113,7 +109,7 @@ async function getGraphHopperRoute(
     graphHopperProfile: string,
     privateRoads: boolean
 ): Promise<TrackPoint[]> {
-    let response = await fetch(`${GRAPHHOPPER_URL}/route`, { // [embed] was hardcoded 'https://graphhopper.gpx.studio/route'
+    let response = await fetch(`${import.meta.env.VITE_GRAPHHOPPER_URL || 'https://graphhopper.gpx.studio'}/route`, { // [embed] env-configurable; default = upstream
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
