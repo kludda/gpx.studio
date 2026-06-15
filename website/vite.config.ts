@@ -13,26 +13,18 @@ export default defineConfig({
         // [embed] Allow the reverse-proxied host (gpxstudio.eel.se) through Vite's host check.
         // Leading dot = the domain and all its subdomains.
         allowedHosts: ['.eel.se'],
-        // [embed] CORS fix: gpx.studio's backend services only send CORS headers for
-        // https://gpx.studio, so we proxy them through this dev server. The editor fetches
-        // them as same-origin relative paths (see .env VITE_*_URL=/…) → no CORS at all.
-        // `changeOrigin` rewrites the Host header so upstream TLS SNI + vhost routing work.
+        // [embed] CORS fix: graphhopper + overpass are fetch/XHR API calls that gpx.studio
+        // only CORS-allows for https://gpx.studio, so we proxy them through this dev server —
+        // the editor calls them as same-origin relative paths (see .env VITE_*_URL=/…) → no
+        // CORS at all. `changeOrigin` rewrites the Host header so upstream TLS SNI + vhost
+        // routing work. tiles/styles (and the fonts/sprites they reference) load fine
+        // cross-origin, so they stay pointed at upstream — no proxy needed.
         // NOTE: dev-server only — a production build needs an infra-level proxy instead.
         proxy: {
             '/graphhopper': {
                 target: 'https://graphhopper.gpx.studio',
                 changeOrigin: true,
                 rewrite: (path) => path.replace(/^\/graphhopper/, ''),
-            },
-            '/styles': {
-                target: 'https://styles.gpx.studio',
-                changeOrigin: true,
-                rewrite: (path) => path.replace(/^\/styles/, ''),
-            },
-            '/tiles': {
-                target: 'https://tiles.gpx.studio',
-                changeOrigin: true,
-                rewrite: (path) => path.replace(/^\/tiles/, ''),
             },
             '/overpass': {
                 target: 'https://overpass.gpx.studio',

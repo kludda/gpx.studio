@@ -30,16 +30,11 @@ import bikerouterGravel from './custom/bikerouter-gravel.json';
 
 export const maptilerKeyPlaceHolder = 'MAPTILER_KEY';
 
-// [embed] styles/tiles endpoints made configurable via env (VITE_STYLES_URL / VITE_TILES_URL).
-// Fall back to the upstream defaults so standalone behavior is unchanged. See .env.
-const STYLES_URL = import.meta.env.VITE_STYLES_URL || 'https://styles.gpx.studio';
-const TILES_URL = import.meta.env.VITE_TILES_URL || 'https://tiles.gpx.studio';
-
 export const basemaps: { [key: string]: string | StyleSpecification } = {
-    libertyTopo: `${STYLES_URL}/liberty-topo.json`, // [embed] was 'https://styles.gpx.studio/liberty-topo.json'
-    libertySatellite: `${STYLES_URL}/liberty-satellite.json`, // [embed] was 'https://styles.gpx.studio/liberty-satellite.json'
-    osm: `${STYLES_URL}/osm.json`, // [embed] was 'https://styles.gpx.studio/osm.json'
-    osmTopo: `${STYLES_URL}/osm-topo.json`, // [embed] was 'https://styles.gpx.studio/osm-topo.json'
+    libertyTopo: 'https://styles.gpx.studio/liberty-topo.json',
+    libertySatellite: 'https://styles.gpx.studio/liberty-satellite.json',
+    osm: 'https://styles.gpx.studio/osm.json',
+    osmTopo: 'https://styles.gpx.studio/osm-topo.json',
     esriSatellite: {
         version: 8,
         sources: {
@@ -1494,7 +1489,7 @@ export const overpassQueryData: Record<string, OverpassQueryData> = {
 export const terrainSources: { [key: string]: RasterDEMSourceSpecification } = {
     mapterhorn: {
         type: 'raster-dem',
-        url: `${TILES_URL}/mapterhorn.json`, // [embed] was 'https://tiles.gpx.studio/mapterhorn.json'
+        url: 'https://tiles.gpx.studio/mapterhorn.json',
         encoding: 'terrarium',
     },
 };
