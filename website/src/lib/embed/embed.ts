@@ -245,7 +245,7 @@ async function handleAction(m: Record<string, any>) {
                 persistRegistry();
                 setStatus(localId, 'saved');
             } else {
-                setStatus(localId, 'error');
+                setStatus(localId, 'error', m.message);
             }
             break;
         }
