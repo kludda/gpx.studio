@@ -268,3 +268,16 @@ function getChangedFileIds(patch: Patch[]): string[] {
 }
 
 export const fileActionManager = new FileActionManager(db);
+
+// Embed mode bootstrap. Kept here (not in the app route) so the route file stays
+// identical to upstream. The commit tap above (`onLocalCommit`) exists by the
+// time `$lib/embed` initialises. A dynamic import is used so this module finishes
+// evaluating first — `$lib/embed` imports `onLocalCommit` from here, so a static
+// import would form an init-order cycle. `initEmbed` self-guards too, but gating
+// on the `embedded` flag avoids running it (and waiting on the chunk) standalone.
+if (
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('embedded') === '1'
+) {
+    import('$lib/embed/embed').then((m) => m.initEmbed());
+}
