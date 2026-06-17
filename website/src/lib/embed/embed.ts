@@ -20,7 +20,7 @@ import { onLocalCommit } from '$lib/logic/file-action-manager';
 import { fileStateCollection } from '$lib/logic/file-state';
 import { getFileIds } from '$lib/logic/file-actions';
 import { selection } from '$lib/logic/selection';
-import { setStatus, clearStatus } from './status';
+import { setStatus, clearStatus, syncStatus } from './status';
 import { embedError, embedNotice } from './error';
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
@@ -105,7 +105,7 @@ function post(msg: Record<string, unknown>) {
 // Inbound: load / merge — write straight to Dexie (echo-free).
 // liveQuery in fileStateCollection picks the write up and renders it.
 // --------------------------------------------------------------------------- //
-async function applyIncoming(hostId: string, data: string, title?: string) {
+async function applyIncoming(hostId: string, data: string, title?: string, fromMerge = false) {
     applyingRemote = true;
     try {
         const file = parseGPX(data);
@@ -115,6 +115,16 @@ async function applyIncoming(hostId: string, data: string, title?: string) {
         }
 
         let localId = localByHost().get(hostId);
+        // A merge replacing an already-open file silently discards any local edits
+        // that aren't yet confirmed saved (whole-file LWW). Detect that *before* we
+        // overwrite, so we can warn. 'error' is excluded — a rejected save (409)
+        // already has its own toast; this targets the otherwise-silent cases: a
+        // debounced edit not yet sent, or an autosave still in flight.
+        const discardsLocalEdits =
+            fromMerge &&
+            localId !== undefined &&
+            (pending.has(localId) || get(syncStatus).get(localId)?.state === 'saving');
+
         if (!localId) {
             localId = getFileIds(1)[0];
             registry.set(localId, { hostId });
@@ -126,6 +136,15 @@ async function applyIncoming(hostId: string, data: string, title?: string) {
             await db.files.put(freeze(file), localId!);
             await db.fileids.put(localId!, localId!);
         });
+        if (discardsLocalEdits) {
+            pending.delete(localId); // the queued autosave is moot — its base is gone
+            // Per-file stable id: a flurry of merges on one file refreshes one toast
+            // instead of stacking, while different files each get their own.
+            embedNotice(
+                `embed:overwrote:${localId}`,
+                'A newer version from another session replaced your unsaved changes',
+            );
+        }
         setStatus(localId, 'saved'); // in sync with the host
         return localId;
     } finally {
@@ -261,7 +280,8 @@ async function handleAction(m: Record<string, any>) {
             case 'merge':
                 // Whole-file LWW replace. boundsManager only auto-fits *new* files,
                 // so replacing an already-open file preserves the map viewport.
-                await applyIncoming(m.id, m.data, m.title);
+                // fromMerge=true → warn if this discards unsaved local edits.
+                await applyIncoming(m.id, m.data, m.title, true);
                 break;
             case 'remove':
                 await removeIncoming(m.id);
