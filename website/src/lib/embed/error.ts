@@ -24,3 +24,14 @@ export function embedError(context: string, e?: unknown) {
     console.error('[embed]', message, e);
     toast.error(message);
 }
+
+// A sticky, de-duplicated error toast for a *recurring* host condition (e.g. the
+// bridge re-reporting a lost backend connection on every poll). Passing a stable
+// `id` makes repeated calls refresh one toast instead of stacking, and — because
+// each call resets the toast's timer — it stays visible while the condition
+// persists and auto-clears a few seconds after the host stops reporting it (i.e.
+// on reconnection), with no explicit recovery message needed.
+export function embedNotice(id: string, message: string) {
+    console.error('[embed]', id, message);
+    toast.error(message, { id });
+}

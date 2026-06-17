@@ -21,7 +21,7 @@ import { fileStateCollection } from '$lib/logic/file-state';
 import { getFileIds } from '$lib/logic/file-actions';
 import { selection } from '$lib/logic/selection';
 import { setStatus, clearStatus } from './status';
-import { embedError } from './error';
+import { embedError, embedNotice } from './error';
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -267,7 +267,14 @@ async function handleAction(m: Record<string, any>) {
                 // On a promotion ack the host also sends `tempId` (no binding exists yet),
                 // so we key on that and adopt the binding here — folding in the old assignId.
                 const localId = m.tempId ?? localByHost().get(m.id);
-                if (!localId) break;
+                if (!localId) {
+                    // An id-less status is a *global* host notice, not a per-file
+                    // ack (e.g. the bridge lost its backend connection). There's
+                    // no badge to set — surface it as one sticky, de-duplicated
+                    // toast (the host re-sends this on every poll while down).
+                    if (!m.ok && m.message) embedNotice('embed:host-status', m.message);
+                    break;
+                }
                 if (m.ok) {
                     registry.set(localId, { hostId: m.id, version: m.version });
                     persistRegistry();
