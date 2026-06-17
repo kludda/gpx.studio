@@ -17,9 +17,12 @@ export default defineConfig({
         // only CORS-allows for https://gpx.studio, so we proxy them through this dev server —
         // the editor calls them as same-origin relative paths (see .env VITE_*_URL=/…) → no
         // CORS at all. `changeOrigin` rewrites the Host header so upstream TLS SNI + vhost
-        // routing work. tiles/styles (and the fonts/sprites they reference) load fine
-        // cross-origin, so they stay pointed at upstream — no proxy needed.
-        // NOTE: dev-server only — a production build needs an infra-level proxy instead.
+        // routing work. Basemap tiles/styles (and the fonts/sprites they reference) load
+        // fine cross-origin, so they stay pointed at upstream — no proxy needed. The
+        // DEM/elevation tiles (hit when drawing with routing OFF) also need no proxy: the
+        // gpx.studio mirror is CORS-locked, but tiles.mapterhorn.com (the source) sends
+        // Access-Control-Allow-Origin: *, so .env points VITE_ELEVATION_TILES_URL straight
+        // at it. NOTE: dev-server only — a production build needs an infra-level proxy instead.
         proxy: {
             '/graphhopper': {
                 target: 'https://graphhopper.gpx.studio',

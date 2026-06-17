@@ -108,8 +108,9 @@ gpx.studio's **routing** (`graphhopper`) and **POI** (`overpass`) services are f
 that only send CORS headers for the `https://gpx.studio` origin, so from any other origin they
 silently fail ("tools dead"). The fix is to fetch them **same-origin** — `website/vite.config.ts`
 proxies them through the editor's own Vite dev server, so the browser never makes a cross-origin
-request and CORS simply never applies. (`tiles`/`styles` — and the `fonts`/`sprites` they reference —
-load fine cross-origin, so they need no proxy and stay pointed at upstream `*.gpx.studio` in source.)
+request and CORS simply never applies. (Basemap `tiles`/`styles` — and the `fonts`/`sprites` they
+reference — load fine cross-origin, so they need no proxy and stay pointed at upstream `*.gpx.studio`
+in source.)
 
 The proxy maps a relative path on the editor's own origin to each upstream, and `.env` points the
 `VITE_*_URL` vars at those paths:
@@ -118,6 +119,12 @@ The proxy maps a relative path on the editor's own origin to each upstream, and 
 | --- | --- | --- |
 | graphhopper | `/graphhopper` → `graphhopper.gpx.studio` | `VITE_GRAPHHOPPER_URL=/graphhopper` |
 | overpass | `/overpass` → `overpass.gpx.studio` | `VITE_OVERPASS_URL=/overpass` |
+
+**DEM/elevation tiles** (`tiles.gpx.studio/mapterhorn`, hit when drawing with **routing OFF**) are
+CORS-locked on the gpx.studio mirror too, but need **no proxy**: the source `tiles.mapterhorn.com`
+sends `Access-Control-Allow-Origin: *`, so `.env` points `VITE_ELEVATION_TILES_URL` straight at it.
+The var is the full base **including the path segment** — default `https://tiles.gpx.studio/mapterhorn`
+(the mirror's layout), so it can target hosts with a different layout like the mapterhorn source.
 
 Because the fetch is same-origin, there's **no CORS, no preflight, and no mixed-content** to manage —
 the whole fix lives in the repo (`vite.config.ts` + `.env`).
@@ -131,6 +138,7 @@ the whole fix lives in the repo (`vite.config.ts` + `.env`).
 ```ini
 VITE_GRAPHHOPPER_URL=/graphhopper
 VITE_OVERPASS_URL=/overpass
+VITE_ELEVATION_TILES_URL=https://tiles.mapterhorn.com   # CORS-open source; default mirror is https://tiles.gpx.studio/mapterhorn
 # postMessage allowlist — the host's origin (unset = trust-on-first-use, POC default)
 VITE_EMBED_ALLOWED_ORIGINS=https://gpx.example.com
 ```
