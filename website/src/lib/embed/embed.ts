@@ -21,6 +21,7 @@ import { fileStateCollection } from '$lib/logic/file-state';
 import { getFileIds } from '$lib/logic/file-actions';
 import { selection } from '$lib/logic/selection';
 import { setStatus, clearStatus } from './status';
+import { embedError } from './error';
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -39,8 +40,10 @@ const REGISTRY_KEY = 'gpxstudio:embed:registry';
 function persistRegistry() {
     try {
         localStorage.setItem(REGISTRY_KEY, JSON.stringify([...registry]));
-    } catch {
-        /* storage unavailable/full — non-fatal */
+    } catch (e) {
+        // Non-fatal for the running session, but on the next reload server-backed
+        // files would lose their host binding — worth surfacing.
+        embedError('Could not persist sync state — bindings may be lost on reload', e);
     }
 }
 
@@ -48,7 +51,8 @@ async function restoreRegistry() {
     let stored: [string, Entry][];
     try {
         stored = JSON.parse(localStorage.getItem(REGISTRY_KEY) ?? '[]');
-    } catch {
+    } catch (e) {
+        embedError('Could not restore saved sync state', e);
         return;
     }
     if (!Array.isArray(stored) || stored.length === 0) return;
@@ -152,8 +156,13 @@ function flush() {
         const entry = registry.get(localId);
         const file = fileStateCollection.getFile(localId);
         if (entry && file) {
-            // exclude nothing — round-trip the full file back to the host.
-            post({ event: 'autosave', id: entry.hostId, data: buildGPX(file, []) });
+            try {
+                // exclude nothing — round-trip the full file back to the host.
+                post({ event: 'autosave', id: entry.hostId, data: buildGPX(file, []) });
+            } catch (e) {
+                setStatus(localId, 'error');
+                embedError('Failed to autosave to server', e);
+            }
         }
     }
     pending.clear();
@@ -193,17 +202,25 @@ function onCommit(updated: string[], deleted: string[]) {
 export function saveToServer(localId: string) {
     if (registry.has(localId)) return; // already server-backed
     const file = fileStateCollection.getFile(localId);
-    if (!file) return;
-    setStatus(localId, 'saving');
-    const name = file.metadata?.name?.trim();
-    // Promotion is just a save of a file the host hasn't seen: no `id` yet, so we
-    // carry `tempId` (this localId) — the host creates and binds it back via `status`.
-    post({
-        event: 'save',
-        tempId: localId,
-        data: buildGPX(file, []),
-        name: name ? `${name}.gpx` : 'untitled.gpx',
-    });
+    if (!file) {
+        embedError('Cannot save to server: file not found');
+        return;
+    }
+    try {
+        setStatus(localId, 'saving');
+        const name = file.metadata?.name?.trim();
+        // Promotion is just a save of a file the host hasn't seen: no `id` yet, so we
+        // carry `tempId` (this localId) — the host creates and binds it back via `status`.
+        post({
+            event: 'save',
+            tempId: localId,
+            data: buildGPX(file, []),
+            name: name ? `${name}.gpx` : 'untitled.gpx',
+        });
+    } catch (e) {
+        setStatus(localId, 'error');
+        embedError('Failed to save to server', e);
+    }
 }
 
 export function isServerBacked(localId: string): boolean {
@@ -214,41 +231,47 @@ export function isServerBacked(localId: string): boolean {
 // Inbound dispatch.
 // --------------------------------------------------------------------------- //
 async function handleAction(m: Record<string, any>) {
-    switch (m.action) {
-        case 'load': {
-            // Single inbound-open action (multi-file): every loaded file is
-            // selected/activated — preferred UX over silently adding in the bg.
-            const localId = await applyIncoming(m.id, m.data, m.title);
-            if (localId) {
-                selection.selectFileWhenLoaded(localId);
+    try {
+        switch (m.action) {
+            case 'load': {
+                // Single inbound-open action (multi-file): every loaded file is
+                // selected/activated — preferred UX over silently adding in the bg.
+                const localId = await applyIncoming(m.id, m.data, m.title);
+                if (localId) {
+                    selection.selectFileWhenLoaded(localId);
+                }
+                post({ event: 'load', id: m.id });
+                break;
             }
-            post({ event: 'load', id: m.id });
-            break;
-        }
-        case 'merge':
-            // Whole-file LWW replace. boundsManager only auto-fits *new* files,
-            // so replacing an already-open file preserves the map viewport.
-            await applyIncoming(m.id, m.data, m.title);
-            break;
-        case 'remove':
-            await removeIncoming(m.id);
-            break;
-        case 'status': {
-            // Host's ack of a write outcome (draw.io-style single status channel).
-            // `ok:true` carries the new version; `ok:false` carries a message.
-            // On a promotion ack the host also sends `tempId` (no binding exists yet),
-            // so we key on that and adopt the binding here — folding in the old assignId.
-            const localId = m.tempId ?? localByHost().get(m.id);
-            if (!localId) break;
-            if (m.ok) {
-                registry.set(localId, { hostId: m.id, version: m.version });
-                persistRegistry();
-                setStatus(localId, 'saved');
-            } else {
-                setStatus(localId, 'error', m.message);
+            case 'merge':
+                // Whole-file LWW replace. boundsManager only auto-fits *new* files,
+                // so replacing an already-open file preserves the map viewport.
+                await applyIncoming(m.id, m.data, m.title);
+                break;
+            case 'remove':
+                await removeIncoming(m.id);
+                break;
+            case 'status': {
+                // Host's ack of a write outcome (draw.io-style single status channel).
+                // `ok:true` carries the new version; `ok:false` carries a message.
+                // On a promotion ack the host also sends `tempId` (no binding exists yet),
+                // so we key on that and adopt the binding here — folding in the old assignId.
+                const localId = m.tempId ?? localByHost().get(m.id);
+                if (!localId) break;
+                if (m.ok) {
+                    registry.set(localId, { hostId: m.id, version: m.version });
+                    persistRegistry();
+                    setStatus(localId, 'saved');
+                } else {
+                    // Badge keeps the per-file error state; the popup surfaces it loudly.
+                    setStatus(localId, 'error', m.message);
+                    embedError('Host rejected save', m.message);
+                }
+                break;
             }
-            break;
         }
+    } catch (e) {
+        embedError(`Failed to handle "${m.action}" from host`, e);
     }
 }
 
