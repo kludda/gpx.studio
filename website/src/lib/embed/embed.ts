@@ -12,7 +12,6 @@
 //    commitFileStateChange, so they don't echo back out as autosaves.
 //  - Local edits flow out via the commit hook (onLocalCommit).
 
-import { get } from 'svelte/store';
 import { freeze } from 'immer';
 import { parseGPX, buildGPX, GPXFile } from 'gpx';
 import { db } from '$lib/db';
@@ -20,7 +19,7 @@ import { onLocalCommit } from '$lib/logic/file-action-manager';
 import { fileStateCollection } from '$lib/logic/file-state';
 import { getFileIds } from '$lib/logic/file-actions';
 import { selection } from '$lib/logic/selection';
-import { setStatus, clearStatus, syncStatus } from './status';
+import { setStatus, clearStatus } from './status';
 import { embedError, embedNotice } from './error';
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
@@ -115,15 +114,14 @@ async function applyIncoming(hostId: string, data: string, title?: string, fromM
         }
 
         let localId = localByHost().get(hostId);
-        // A merge replacing an already-open file silently discards any local edits
-        // that aren't yet confirmed saved (whole-file LWW). Detect that *before* we
-        // overwrite, so we can warn. 'error' is excluded — a rejected save (409)
-        // already has its own toast; this targets the otherwise-silent cases: a
-        // debounced edit not yet sent, or an autosave still in flight.
-        const discardsLocalEdits =
-            fromMerge &&
-            localId !== undefined &&
-            (pending.has(localId) || get(syncStatus).get(localId)?.state === 'saving');
+        // A merge replacing an already-open file silently discards a local edit
+        // that was made but not yet sent (whole-file LWW). Detect that *before* we
+        // overwrite, so we can warn. Keyed on `pending` (a debounced edit not yet
+        // flushed) rather than the 'saving' badge: that badge is also used while a
+        // file revalidates on reload (no real edit to lose — would false-warn), and
+        // an autosave already in flight against a newer server version is covered by
+        // its own 409 rejection toast.
+        const discardsLocalEdits = fromMerge && localId !== undefined && pending.has(localId);
 
         if (!localId) {
             localId = getFileIds(1)[0];
