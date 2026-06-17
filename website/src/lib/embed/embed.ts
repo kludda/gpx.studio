@@ -238,7 +238,17 @@ async function handleAction(m: Record<string, any>) {
                 // selected/activated — preferred UX over silently adding in the bg.
                 const localId = await applyIncoming(m.id, m.data, m.title);
                 if (localId) {
-                    selection.selectFileWhenLoaded(localId);
+                    // applyIncoming awaits the Dexie write, so the file is usually
+                    // already in fileStateCollection here. selectFileWhenLoaded()
+                    // subscribes and Svelte fires the callback *synchronously* when
+                    // the value is already present — which trips its own `unsubscribe`
+                    // TDZ (ReferenceError). Select directly in that case; only defer
+                    // when the file genuinely hasn't propagated yet.
+                    if (fileStateCollection.getFile(localId)) {
+                        selection.selectFile(localId);
+                    } else {
+                        selection.selectFileWhenLoaded(localId);
+                    }
                 }
                 post({ event: 'load', id: m.id });
                 break;
