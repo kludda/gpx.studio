@@ -63,7 +63,12 @@ async function restoreRegistry() {
     for (const [localId, entry] of stored) {
         if (entry && typeof entry.hostId === 'string' && liveIds.has(localId)) {
             registry.set(localId, entry);
-            setStatus(localId, 'saved'); // server-backed → reflect synced state
+            // The restored Dexie copy may be behind the server (another session
+            // wrote it while we were gone). Mark it 'saving' (revalidating), not
+            // 'saved' — initEmbed re-announces it so the host reconciles against
+            // the server *before* any local edit can autosave a stale copy over a
+            // newer version; the host's merge/status reply settles it to 'saved'.
+            setStatus(localId, 'saving');
         } else {
             changed = true; // dropped a stale entry
         }
@@ -323,5 +328,13 @@ export async function initEmbed() {
         handleAction(m as Record<string, any>);
     });
 
-    post({ event: 'init' });
+    // Re-announce our server-backed files (hostId + last-known version) so the
+    // host can reconcile each against the server and push down any newer copy
+    // before the user edits — closing the reload race where a stale Dexie copy
+    // could autosave over a newer server version. Only hostId crosses the
+    // boundary, never the gpx-N localId.
+    post({
+        event: 'init',
+        files: [...registry].map(([, e]) => ({ id: e.hostId, version: e.version })),
+    });
 }

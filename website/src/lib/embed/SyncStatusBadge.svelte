@@ -16,7 +16,7 @@
 
     const tips: Record<SyncState, string> = {
         local: 'Browser-only — not synced',
-        saving: 'Syncing file to server',
+        saving: 'Syncing file with server',
         saved: 'File synced to server',
         error: 'Error',
     };
