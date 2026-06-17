@@ -48,7 +48,8 @@ so every message is origin-checked.
 **Identity.** The host **`id` is the file's path relative to the store root** (e.g.
 `trips/day1.gpx`). Inside the iframe the editor uses its own local ids (`gpx-N`) and keeps a
 `localId ↔ hostId` registry — only `id`/`hostId` ever crosses `postMessage`. **`version`** is an
-opaque token (the backend's `st_mtime_ns`) used for last-write-wins.
+opaque token (the backend's mtime in **microseconds** — coarser than `st_mtime_ns` but under JS's
+`MAX_SAFE_INTEGER`, so it round-trips intact) used for last-write-wins and conflict detection.
 
 ### Handshake
 
@@ -70,7 +71,7 @@ Until the first inbound message arrives the editor doesn't yet know the host's o
 
 | Message | When |
 | --- | --- |
-| `{event:'init'}` | Editor mounted and ready; expects `load`. |
+| `{event:'init', files}` | Editor mounted and ready; expects `load`. `files` = the editor's already server-backed files as `[{id, version}]`, restored from a prior session, so the host can **reconcile each against the server before any edit** (the reload race — see [Reload reconciliation](#reload-reconciliation--conflicts)). Empty on a cold open. |
 | `{event:'load', id}` | Ack of a finished `load`. |
 | `{event:'autosave', id, data}` | Debounced (~`AUTOSAVE_DEBOUNCE_MS`) on any local change to a **server-backed** file. `data` = full `buildGPX` text. |
 | `{event:'save', id, data}` | Explicit save of a server-backed file. Host treats it identically to `autosave`; the editor currently emits `autosave` for all local edits. |
@@ -83,7 +84,8 @@ Until the first inbound message arrives the editor doesn't yet know the host's o
 | `{action:'load', id, data, title?, autosave:1}` | Open a file (one per opened file — multi-file): editor `parseGPX`s, opens it, maps `id ↔ localId`, and **selects** it. |
 | `{action:'merge', id, data}` | Whole-file LWW replace of an already-open file (collaboration inbound from the poll loop). Preserves the map viewport. |
 | `{action:'remove', id}` | Host removed file `id`; editor closes it. |
-| `{action:'status', id, ok, version?, message?, tempId?}` | **Ack** of a write outcome (`autosave`/`save`/promotion). `ok:true` carries the new `version` (adopted so the next poll won't echo the write back) → "Saved"; `ok:false` carries `message` → "Error". On a **promotion** ack it also carries `tempId` — no `id↔localId` binding exists yet, so this is how the editor binds its local file to the new path. |
+| `{action:'status', id, ok, version?, message?, tempId?}` | **Per-file ack** of a write outcome (`autosave`/`save`/promotion). `ok:true` carries the new `version` (adopted so the next poll won't echo the write back) → "Saved"; `ok:false` carries `message` → "Error". On a **promotion** ack it also carries `tempId` — no `id↔localId` binding exists yet, so this is how the editor binds its local file to the new path. |
+| `{action:'status', ok:false, message}` *(no `id`/`tempId`)* | **Global host notice**, not a per-file ack — the editor can't resolve a `localId`, so there's no badge to set. It surfaces `message` as a **sticky, de-duplicated toast** (stable id → repeated sends refresh one toast and it auto-clears when they stop). The bridge uses this for **connection loss**: it re-sends every poll while the backend is unreachable ("Connection lost, please reload browser"). |
 
 The `status` ack is the only real addition beyond draw.io's set — it powers the status badge
 without a websocket: the host just relays the result of its write back into the iframe. A
@@ -97,10 +99,28 @@ editor ──{event:'save', tempId, data, name}───────────
 editor ◀──{action:'status', tempId, id, ok:true, version}── host  (bind localId → path; "Saved"; host starts polling id)
 ```
 
-Collaboration is **last-write-wins, poll-based** (no websocket): the host pushes
+Collaboration is **poll-based, last-write-wins** (no websocket): the host pushes
 `{action:'merge', id, data}` when an open file changes on its side, and the editor applies it as a
 whole-file replace (preserving the map viewport). The host-side poll/echo mechanics live in the
-[bridge README](../gpx.studio-bridge/README.md).
+[bridge README](../gpx.studio-bridge/README.md#collaboration-poll-based-no-websocket).
+
+### Reload reconciliation & conflicts
+
+Two cases need care beyond the happy path; both are driven from the editor side here.
+
+- **Reload.** The editor persists its files in Dexie, so after a reload it shows its **last-known
+  copy** — which may be behind the server if another session edited it meanwhile. To avoid a first
+  edit autosaving that stale copy over the newer version, the editor re-announces its server-backed
+  files in `{event:'init', files}` (see above) and marks them **"revalidating"** (the
+  `saving`/`CloudSync` badge), *not* "Saved", until the host's `merge`/`status` reply settles them.
+  The host then reconciles each against the server before any edit lands.
+- **Conflict.** Each `autosave` carries a base `version`; the host's `PUT` **rejects a stale base
+  with 409**. That arrives back as `{action:'status', id, ok:false, message}` → red badge + error
+  toast, and the next poll `merge`s the server's version down (the local edit is discarded — whole-
+  file LWW, no field merge). So the **first writer to reach the server wins**.
+
+Both mechanics — the version scheme, echo avoidance, the 409, and the id-less connection-loss notice —
+are detailed in the [bridge README](../gpx.studio-bridge/README.md#collaboration-poll-based-no-websocket).
 
 ## CORS fix (Vite dev-server proxy)
 
