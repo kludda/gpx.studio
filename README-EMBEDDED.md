@@ -3,7 +3,7 @@
 This fork adds an **embedded mode** to the gpx.studio editor: it runs inside a host application's
 `<iframe>`, owns **no files**, and exchanges GPX bytes with the host over `postMessage`. The host
 owns storage, identity and versioning; collaboration is last-write-wins. A reference host lives in
-the separate **gpx.studio-bridge** repo.
+the separate [**gpx.studio-bridge**](https://github.com/kludda/gpx.studio-bridge) repo.
 
 Activate embedded mode by loading the editor with **`?embedded=1`** (e.g. `…/app?embedded=1`).
 The embed layer lives under `website/src/lib/embed/`; it also touches `website/src/lib/db.ts` (a
@@ -35,7 +35,7 @@ You can reverse proxy the services and rewrite the headers.
 
 #### Vite dev-server proxy
 
-Another alternative is to fetch them  **same-origin** — `website/vite.config.ts` proxies them through the editor's own Vite dev server, so the browser never makes a cross-origin request and CORS simply never applies.
+The easiest alternative in a dev environment is to fetch them  **same-origin** — `website/vite.config.ts` proxies them through the editor's own Vite dev server, so the browser never makes a cross-origin request and CORS simply never applies.
 
 The proxy maps a relative path on the editor's own origin to each upstream, and `.env` points the
 `VITE_*_URL` vars at those paths:
