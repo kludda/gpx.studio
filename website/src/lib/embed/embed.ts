@@ -1,5 +1,5 @@
 // Embed mode for gpx.studio — the editor half of the draw.io-style postMessage
-// protocol (see plan.md). Activated by `?embedded=1`. (Note: `?embed` is taken
+// protocol (see README-EMBEDDED.md). Activated by `?embedded=1`. (Note: `?embed` is taken
 // by upstream's legacy read-only map-embedding redirect in the root +layout, so
 // editor-embed mode uses the distinct `embedded` key to avoid that redirect.)
 // All editor-owns-no-files
