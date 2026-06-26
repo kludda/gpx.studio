@@ -15,7 +15,7 @@ only how to work in this repo.
 - `embedded-dev` — **default working branch**; commit at will, push often (remote backup).
 - `embedded` — tidy; **only squashed large commits, and only when explicitly asked.**
 - `upstream` — tracks upstream; **never commit our work here** (sync/rebase source only).
-- Commit from this repo (`git -C gpx.studio …`); never `git` at the workspace root.
+- Keep editor changes in their own commits, separate from the bridge.
 
 ## Invariants (never violate — see `README-EMBEDDED.md` for the why)
 - The editor owns **no files**; storage, identity and versioning are the host's.
