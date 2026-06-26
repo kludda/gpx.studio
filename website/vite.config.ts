@@ -10,9 +10,12 @@ export default defineConfig({
     server: {
         port: 5180,
         strictPort: true,
-        // [embed] Allow the reverse-proxied host (gpxstudio.eel.se) through Vite's host check.
-        // Leading dot = the domain and all its subdomains.
-        allowedHosts: ['.eel.se'],
+        // [embed] `true` disables Vite's host check entirely so the editor can be
+        // reverse-proxied / framed from any host.
+        // To narrow it, swap in an array of hostnames, e.g.:
+        //   allowedHosts: ['example.com', '.example.com'],
+        // (a leading dot matches the domain and all its subdomains, e.g. app.example.com).
+        allowedHosts: true,
         // [embed] CORS fix: graphhopper + overpass are fetch/XHR API calls that gpx.studio
         // only CORS-allows for https://gpx.studio, so we proxy them through this dev server —
         // the editor calls them as same-origin relative paths (see .env VITE_*_URL=/…) → no
