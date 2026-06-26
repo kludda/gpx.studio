@@ -13,9 +13,9 @@ behavior is unchanged.
 
 ## Dependencies
 
-gpx.studio's **routing** (`graphhopper`) and **POI** (`overpass`) and **DEM/elevation tiles** (`mapterhorn`) services are fetch/XHR API calls that only send CORS headers for the `https://gpx.studio` origin, so from any other origin they fail and the editor becomes unusable.
+gpx.studio's **routing** (`graphhopper`), **POI** (`overpass`), and **DEM/elevation tiles** (`mapterhorn`) services are fetch/XHR API calls that only send CORS headers for the `https://gpx.studio` origin, so from any other origin they fail and the editor becomes unusable.
 
-The gpx.studio served map styles will also fail with browser console error, but the app still works without those maps.
+The gpx.studio-served map styles will also fail with a browser console error, but the app still works without those maps.
 
 
 ### DEM/elevation tiles (`mapterhorn`)
@@ -29,13 +29,13 @@ You can fetch **DEM/elevation tiles** from `tiles.mapterhorn.com` directly inste
 
 You can (likely, I have not tested) serve your own `graphhopper`, `overpass` and `mapterhorn` instances and point `VITE_GRAPHHOPPER_URL`, `VITE_OVERPASS_URL` and `VITE_ELEVATION_TILES_URL` in `website/.env` to those.
 
-#### Revese proxy
+#### Reverse proxy
 
 You can reverse proxy the services and rewrite the headers.
 
 #### Vite dev-server proxy
 
-The easiest alternative in a dev environment is to fetch them  **same-origin** — `website/vite.config.ts` proxies them through the editor's own Vite dev server, so the browser never makes a cross-origin request and CORS simply never applies.
+The easiest alternative in a dev environment is to fetch them **same-origin** — `website/vite.config.ts` proxies them through the editor's own Vite dev server, so the browser never makes a cross-origin request and CORS simply never applies.
 
 The proxy maps a relative path on the editor's own origin to each upstream, and `.env` points the
 `VITE_*_URL` vars at those paths:
