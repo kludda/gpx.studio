@@ -16,6 +16,8 @@ only how to work in this repo.
 - `embedded` — tidy; **only squashed large commits, and only when explicitly asked.**
 - `upstream` — tracks upstream; **never commit our work here** (sync/rebase source only).
 - Keep editor changes in their own commits, separate from the bridge.
+- **Never commit `website/package-lock.json` or `website/static/en.manifest.webmanifest`** — these
+  carry persistent local-only churn; leave them in the working tree and stage files explicitly.
 
 ## Invariants (never violate — see `README-EMBEDDED.md` for the why)
 - The editor owns **no files**; storage, identity and versioning are the host's.
