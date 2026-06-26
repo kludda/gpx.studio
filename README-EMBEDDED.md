@@ -82,11 +82,11 @@ JSON objects over `window.postMessage`, activated by loading the editor with **`
   `action`, pins the host's origin on the first accepted message (trust-on-first-use) unless
   `VITE_EMBED_ALLOWED_ORIGINS` is set, and switches on `msg.action`.
 
-**Identity.** The host **`id` is the file's path relative to the store root** (e.g.
-`trips/day1.gpx`). Inside the iframe the editor uses its own local ids (`gpx-N`) and keeps a
-`localId ↔ hostId` registry — only `id`/`hostId` ever crosses `postMessage`. **`version`** is an
-opaque token (the backend's mtime in **microseconds** — coarser than `st_mtime_ns` but under JS's
-`MAX_SAFE_INTEGER`, so it round-trips intact) used for last-write-wins and conflict detection.
+**Identity.** The host `id` (`hostId`) is an **opaque token** the editor never interprets — how the
+host derives it is the host's concern. Inside the iframe the editor uses its own local ids (`gpx-N`)
+and keeps a `localId ↔ hostId`
+registry — only `id`/`hostId` ever crosses `postMessage`. **`version`** is likewise an opaque token
+the editor stores and echoes back unchanged, used for last-write-wins and conflict detection.
 
 ### Handshake
 
@@ -122,7 +122,7 @@ Until the first inbound message arrives the editor doesn't yet know the host's o
 | `{action:'merge', id, data}` | Whole-file LWW replace of an already-open file (collaboration inbound from the poll loop). Preserves the map viewport. |
 | `{action:'remove', id}` | Host removed file `id`; editor closes it. |
 | `{action:'status', id, ok, version?, message?, tempId?}` | **Per-file ack** of a write outcome (`autosave`/`save`/promotion). `ok:true` carries the new `version` (adopted so the next poll won't echo the write back) → "Saved"; `ok:false` carries `message` → "Error". On a **promotion** ack it also carries `tempId` — no `id↔localId` binding exists yet, so this is how the editor binds its local file to the new path. |
-| `{action:'status', ok:false, message}` *(no `id`/`tempId`)* | **Global host notice**, not a per-file ack — the editor can't resolve a `localId`, so there's no badge to set. It surfaces `message` as a **sticky, de-duplicated toast** (stable id → repeated sends refresh one toast and it auto-clears when they stop). The bridge uses this for **connection loss**: it re-sends every poll while the backend is unreachable ("Connection lost, please reload browser"). |
+| `{action:'status', ok:false, message}` *(no `id`/`tempId`)* | **Global host notice**, not a per-file ack — the editor can't resolve a `localId`, so there's no badge to set. It surfaces `message` as a **sticky, de-duplicated toast** (stable id → repeated sends refresh one toast and it auto-clears when they stop) — e.g. a host connection-loss notice. How the host decides to send it is the host's concern. |
 
 The `status` ack is the only real addition beyond draw.io's set — it powers the status badge
 without a websocket: the host just relays the result of its write back into the iframe. A
@@ -138,8 +138,8 @@ editor ◀──{action:'status', tempId, id, ok:true, version}── host  (bin
 
 Collaboration is **poll-based, last-write-wins** (no websocket): the host pushes
 `{action:'merge', id, data}` when an open file changes on its side, and the editor applies it as a
-whole-file replace (preserving the map viewport). The host-side poll/echo mechanics live in the
-[bridge README](../gpx.studio-bridge/README.md#collaboration-poll-based-no-websocket).
+whole-file replace (preserving the map viewport). The host-side poll/echo mechanics are the host's
+concern.
 
 ### Reload reconciliation & conflicts
 
@@ -156,6 +156,6 @@ Two cases need care beyond the happy path; both are driven from the editor side 
   toast, and the next poll `merge`s the server's version down (the local edit is discarded — whole-
   file LWW, no field merge). So the **first writer to reach the server wins**.
 
-Both mechanics — the version scheme, echo avoidance, the 409, and the id-less connection-loss notice —
-are detailed in the [bridge README](../gpx.studio-bridge/README.md#collaboration-poll-based-no-websocket).
+The host-side counterparts — the version scheme, echo avoidance, the 409, and the id-less
+connection-loss notice — are the host's concern.
 
