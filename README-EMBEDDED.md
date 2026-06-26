@@ -2,7 +2,7 @@
 
 This fork adds an **embedded mode** to the gpx.studio editor: it runs inside a host application's
 `<iframe>`, owns **no files**, and exchanges GPX bytes with the host over `postMessage`. The host
-owns storage, identity and versioning; collaboration is last-write-wins. A reference host lives in
+owns storage, identity and versioning. A reference host lives in
 the separate [**gpx.studio-bridge**](https://github.com/kludda/gpx.studio-bridge) repo.
 
 Activate embedded mode by loading the editor with **`?embedded=1`** (e.g. `…/app?embedded=1`).
@@ -86,7 +86,7 @@ JSON objects over `window.postMessage`, activated by loading the editor with **`
 host derives it is the host's concern. Inside the iframe the editor uses its own local ids (`gpx-N`)
 and keeps a `localId ↔ hostId`
 registry — only `id`/`hostId` ever crosses `postMessage`. **`version`** is likewise an opaque token
-the editor stores and echoes back unchanged, used for last-write-wins and conflict detection.
+the editor stores and echoes back unchanged, used by the host for conflict detection.
 
 ### Handshake
 
@@ -119,7 +119,7 @@ Until the first inbound message arrives the editor doesn't yet know the host's o
 | Message | Effect |
 | --- | --- |
 | `{action:'load', id, data, title?, autosave:1}` | Open a file (one per opened file — multi-file): editor `parseGPX`s, opens it, maps `id ↔ localId`, and **selects** it. |
-| `{action:'merge', id, data}` | Whole-file LWW replace of an already-open file (collaboration inbound from the poll loop). Preserves the map viewport. |
+| `{action:'merge', id, data}` | Whole-file replace of an already-open file (collaboration inbound from the host). Preserves the map viewport. |
 | `{action:'remove', id}` | Host removed file `id`; editor closes it. |
 | `{action:'status', id, ok, version?, message?, tempId?}` | **Per-file ack** of a write outcome (`autosave`/`save`/promotion). `ok:true` carries the new `version` (adopted so the next poll won't echo the write back) → "Saved"; `ok:false` carries `message` → "Error". On a **promotion** ack it also carries `tempId` — no `id↔localId` binding exists yet, so this is how the editor binds its local file to the new path. |
 | `{action:'status', ok:false, message}` *(no `id`/`tempId`)* | **Global host notice**, not a per-file ack — the editor can't resolve a `localId`, so there's no badge to set. It surfaces `message` as a **sticky, de-duplicated toast** (stable id → repeated sends refresh one toast and it auto-clears when they stop) — e.g. a host connection-loss notice. How the host decides to send it is the host's concern. |
@@ -133,13 +133,14 @@ both acks the write and delivers the binding.
 
 ```
 editor ──{event:'save', tempId, data, name}──────────────▶ host  POST /file  (auto-suffix on collision)
-editor ◀──{action:'status', tempId, id, ok:true, version}── host  (bind localId → path; "Saved"; host starts polling id)
+editor ◀──{action:'status', tempId, id, ok:true, version}── host  (bind localId → path; "Saved"; host now syncs id)
 ```
 
-Collaboration is **poll-based, last-write-wins** (no websocket): the host pushes
-`{action:'merge', id, data}` when an open file changes on its side, and the editor applies it as a
-whole-file replace (preserving the map viewport). The host-side poll/echo mechanics are the host's
-concern.
+For ongoing collaboration the host pushes `{action:'merge', id, data}` whenever an open file changes
+on its side, and the editor applies it as a **whole-file replace** (preserving the map viewport).
+That is the whole of the editor's view: it never polls and never field-merges. What the `merge` bytes
+represent (a last-write-wins overwrite, a real merge, …) and how the host notices the change
+(polling, websocket, …) are the host's concern.
 
 ### Reload reconciliation & conflicts
 
@@ -151,10 +152,11 @@ Two cases need care beyond the happy path; both are driven from the editor side 
   files in `{event:'init', files}` (see above) and marks them **"revalidating"** (the
   `saving`/`CloudSync` badge), *not* "Saved", until the host's `merge`/`status` reply settles them.
   The host then reconciles each against the server before any edit lands.
-- **Conflict.** Each `autosave` carries a base `version`; the host's `PUT` **rejects a stale base
-  with 409**. That arrives back as `{action:'status', id, ok:false, message}` → red badge + error
-  toast, and the next poll `merge`s the server's version down (the local edit is discarded — whole-
-  file LWW, no field merge). So the **first writer to reach the server wins**.
+- **Conflict.** Each `autosave` carries a base `version`. If the host rejects it as stale, that
+  arrives back as `{action:'status', id, ok:false, message}` → red badge + error toast; the host then
+  sends a `merge`, which the editor applies as a whole-file replace (the local edit is discarded — the
+  editor never field-merges). Whether a stale write is rejected at all, and what the surviving content
+  is, are the host's policy.
 
 The host-side counterparts — the version scheme, echo avoidance, the 409, and the id-less
 connection-loss notice — are the host's concern.
