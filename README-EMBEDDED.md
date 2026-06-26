@@ -6,8 +6,9 @@ owns storage, identity and versioning. A reference host lives in
 the separate [**gpx.studio-bridge**](https://github.com/kludda/gpx.studio-bridge) repo.
 
 Activate embedded mode by loading the editor with **`?embedded=1`** (e.g. `…/app?embedded=1`).
-The embed layer lives under `website/src/lib/embed/`; it also touches `website/src/lib/db.ts` (a
-commit hook for autosave), `…/components/Menu.svelte` ("Save to server"), and
+The embed layer lives under `website/src/lib/embed/`; it also touches
+`website/src/lib/logic/file-action-manager.ts` (the `onLocalCommit` autosave tap and the embed
+bootstrap), `…/components/Menu.svelte` ("Save to server"), and
 `…/components/file-list/FileListNodeLabel.svelte` (the sync-status badge). Standalone (non-embedded)
 behavior is unchanged.
 

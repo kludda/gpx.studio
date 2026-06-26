@@ -7,8 +7,9 @@ only how to work in this repo.
 ## Scope of changes
 - **Confine all changes to `website/`.** Do **not** modify `gpx/` — use `parseGPX` / `buildGPX`
   as-is.
-- The embed addon is `website/src/lib/embed/`. It also touches `website/src/lib/db.ts` (autosave
-  commit hook), `…/components/Menu.svelte` ("Save to server"), and
+- The embed addon is `website/src/lib/embed/`. It also touches
+  `website/src/lib/logic/file-action-manager.ts` (the `onLocalCommit` autosave tap + the embed
+  bootstrap), `…/components/Menu.svelte` ("Save to server"), and
   `…/components/file-list/FileListNodeLabel.svelte` (sync-status badge).
 
 ## Branches & commits
@@ -25,4 +26,5 @@ only how to work in this repo.
   `hostId` ever crosses postMessage.
 - Apply inbound host updates by writing **Dexie directly** (bypassing `commitFileStateChange`) so
   they don't echo back as autosaves.
-- The `db.ts` commit hook must **not change standalone behavior** when the app isn't embedded.
+- The `file-action-manager.ts` commit tap (`onLocalCommit`) must **not change standalone behavior**
+  when the app isn't embedded — it stays null and inert unless `$lib/embed` registers a listener.
