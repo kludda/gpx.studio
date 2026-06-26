@@ -24,7 +24,7 @@ liveQuery(() => db.overpassdata.toArray()).subscribe((pois) => {
 });
 
 export class OverpassLayer {
-    overpassUrl = 'https://overpass.gpx.studio/api/interpreter';
+    overpassUrl = `${import.meta.env.VITE_OVERPASS_URL || 'https://overpass.gpx.studio'}/api/interpreter`; // [embed] env-configurable; default = upstream
     minZoom = 12;
     queryZoom = 12;
     expirationTime = 7 * 24 * 3600 * 1000;

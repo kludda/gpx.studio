@@ -109,7 +109,7 @@ async function getGraphHopperRoute(
     graphHopperProfile: string,
     privateRoads: boolean
 ): Promise<TrackPoint[]> {
-    let response = await fetch('https://graphhopper.gpx.studio/route', {
+    let response = await fetch(`${import.meta.env.VITE_GRAPHHOPPER_URL || 'https://graphhopper.gpx.studio'}/route`, { // [embed] env-configurable; default = upstream
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

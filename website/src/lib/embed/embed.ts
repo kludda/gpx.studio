@@ -1,0 +1,358 @@
+// Embed mode for gpx.studio — the editor half of the draw.io-style postMessage
+// protocol (see README-EMBEDDED.md). Activated by `?embedded=1`. (Note: `?embed` is taken
+// by upstream's legacy read-only map-embedding redirect in the root +layout, so
+// editor-embed mode uses the distinct `embedded` key to avoid that redirect.)
+// All editor-owns-no-files
+// logic lives here; standalone behaviour is untouched when this is never called.
+//
+// Key invariants:
+//  - `gpx-N` ids never leave the iframe. The registry maps localId ↔ hostId
+//    (the host's relative path); only hostId crosses postMessage.
+//  - Inbound files/changes are written *directly to Dexie*, bypassing
+//    commitFileStateChange, so they don't echo back out as autosaves.
+//  - Local edits flow out via the commit hook (onLocalCommit).
+
+import { freeze } from 'immer';
+import { parseGPX, buildGPX, GPXFile } from 'gpx';
+import { db } from '$lib/db';
+import { onLocalCommit } from '$lib/logic/file-action-manager';
+import { fileStateCollection } from '$lib/logic/file-state';
+import { getFileIds } from '$lib/logic/file-actions';
+import { selection } from '$lib/logic/selection';
+import { setStatus, clearStatus } from './status';
+import { embedError, embedNotice } from './error';
+
+const AUTOSAVE_DEBOUNCE_MS = 500;
+
+// localId (gpx-N) → host binding. Presence in the registry == "server-backed".
+type Entry = { hostId: string; version?: number };
+const registry = new Map<string, Entry>();
+const localByHost = () => new Map([...registry].map(([l, e]) => [e.hostId, l]));
+
+// The registry must survive an iframe/bridge reload so promoted (server-backed)
+// files keep their localId↔hostId binding — otherwise they'd lose autosave/status
+// and a re-`load` from the host would create a duplicate gpx-N instead of
+// re-attaching. Dexie itself persists by design; we mirror the mapping into
+// localStorage (durable + shared across same-origin tabs, like the shared DB).
+const REGISTRY_KEY = 'gpxstudio:embed:registry';
+
+function persistRegistry() {
+    try {
+        localStorage.setItem(REGISTRY_KEY, JSON.stringify([...registry]));
+    } catch (e) {
+        // Non-fatal for the running session, but on the next reload server-backed
+        // files would lose their host binding — worth surfacing.
+        embedError('Could not persist sync state — bindings may be lost on reload', e);
+    }
+}
+
+async function restoreRegistry() {
+    let stored: [string, Entry][];
+    try {
+        stored = JSON.parse(localStorage.getItem(REGISTRY_KEY) ?? '[]');
+    } catch (e) {
+        embedError('Could not restore saved sync state', e);
+        return;
+    }
+    if (!Array.isArray(stored) || stored.length === 0) return;
+    // Only keep entries whose file still exists in Dexie (it may have been
+    // deleted from another tab while this one was gone).
+    const liveIds = new Set(await db.fileids.toArray());
+    let changed = false;
+    for (const [localId, entry] of stored) {
+        if (entry && typeof entry.hostId === 'string' && liveIds.has(localId)) {
+            registry.set(localId, entry);
+            // The restored Dexie copy may be behind the server (another session
+            // wrote it while we were gone). Mark it 'saving' (revalidating), not
+            // 'saved' — initEmbed re-announces it so the host reconciles against
+            // the server *before* any local edit can autosave a stale copy over a
+            // newer version; the host's merge/status reply settles it to 'saved'.
+            setStatus(localId, 'saving');
+        } else {
+            changed = true; // dropped a stale entry
+        }
+    }
+    if (changed) persistRegistry();
+}
+
+// Guard so direct-to-Dexie inbound writes never trigger an outbound autosave.
+let applyingRemote = false;
+
+// --------------------------------------------------------------------------- //
+// Transport: origin-checked postMessage to the host (window.parent).
+// --------------------------------------------------------------------------- //
+const configuredOrigins = (import.meta.env.VITE_EMBED_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+
+// Host origin, learned on the first accepted inbound message (trust-on-first-use
+// when no allowlist is configured — fine for the local POC). Until then we must
+// announce with '*' since we don't yet know the parent's origin.
+let hostOrigin: string | null = null;
+
+function originAllowed(origin: string): boolean {
+    if (configuredOrigins.length > 0) return configuredOrigins.includes(origin);
+    return true; // POC default: TOFU. Set VITE_EMBED_ALLOWED_ORIGINS to lock down.
+}
+
+function post(msg: Record<string, unknown>) {
+    window.parent?.postMessage(msg, hostOrigin ?? '*');
+}
+
+// --------------------------------------------------------------------------- //
+// Inbound: load / merge — write straight to Dexie (echo-free).
+// liveQuery in fileStateCollection picks the write up and renders it.
+// --------------------------------------------------------------------------- //
+async function applyIncoming(hostId: string, data: string, title?: string, fromMerge = false) {
+    applyingRemote = true;
+    try {
+        const file = parseGPX(data);
+        if (file.metadata === undefined) file.metadata = {};
+        if (title && (!file.metadata.name || file.metadata.name.trim() === '')) {
+            file.metadata.name = title.replace(/\.gpx$/i, '');
+        }
+
+        let localId = localByHost().get(hostId);
+        // A merge replacing an already-open file silently discards a local edit
+        // that was made but not yet sent (whole-file LWW). Detect that *before* we
+        // overwrite, so we can warn. Keyed on `pending` (a debounced edit not yet
+        // flushed) rather than the 'saving' badge: that badge is also used while a
+        // file revalidates on reload (no real edit to lose — would false-warn), and
+        // an autosave already in flight against a newer server version is covered by
+        // its own 409 rejection toast.
+        const discardsLocalEdits = fromMerge && localId !== undefined && pending.has(localId);
+
+        if (!localId) {
+            localId = getFileIds(1)[0];
+            registry.set(localId, { hostId });
+            persistRegistry();
+        }
+        file._data.id = localId;
+
+        await db.transaction('rw', db.files, db.fileids, async () => {
+            await db.files.put(freeze(file), localId!);
+            await db.fileids.put(localId!, localId!);
+        });
+        if (discardsLocalEdits) {
+            pending.delete(localId); // the queued autosave is moot — its base is gone
+            // Per-file stable id: a flurry of merges on one file refreshes one toast
+            // instead of stacking, while different files each get their own.
+            embedNotice(
+                `embed:overwrote:${localId}`,
+                'A newer version from another session replaced your unsaved changes',
+            );
+        }
+        setStatus(localId, 'saved'); // in sync with the host
+        return localId;
+    } finally {
+        applyingRemote = false;
+    }
+}
+
+async function removeIncoming(hostId: string) {
+    const localId = localByHost().get(hostId);
+    if (!localId) return;
+    applyingRemote = true;
+    try {
+        await db.transaction('rw', db.files, db.fileids, async () => {
+            await db.files.delete(localId);
+            await db.fileids.delete(localId);
+        });
+    } finally {
+        applyingRemote = false;
+    }
+    registry.delete(localId);
+    persistRegistry();
+    clearStatus(localId);
+}
+
+// --------------------------------------------------------------------------- //
+// Outbound: debounced autosave of server-backed files on local commits.
+// --------------------------------------------------------------------------- //
+const pending = new Set<string>();
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+function flush() {
+    for (const localId of pending) {
+        const entry = registry.get(localId);
+        const file = fileStateCollection.getFile(localId);
+        if (entry && file) {
+            try {
+                // exclude nothing — round-trip the full file back to the host.
+                post({ event: 'autosave', id: entry.hostId, data: buildGPX(file, []) });
+            } catch (e) {
+                setStatus(localId, 'error');
+                embedError('Failed to autosave to server', e);
+            }
+        }
+    }
+    pending.clear();
+}
+
+function onCommit(updated: string[], deleted: string[]) {
+    if (applyingRemote) return;
+    let scheduled = false;
+    for (const id of updated) {
+        if (registry.has(id)) {
+            pending.add(id);
+            setStatus(id, 'saving');
+            scheduled = true;
+        }
+    }
+    // A local delete of a server-backed file: drop its registry entry. (The host
+    // is not asked to delete in this POC — deletion is host-driven via remove.)
+    let registryChanged = false;
+    for (const id of deleted) {
+        if (registry.has(id)) {
+            registry.delete(id);
+            clearStatus(id);
+            pending.delete(id);
+            registryChanged = true;
+        }
+    }
+    if (registryChanged) persistRegistry();
+    if (scheduled) {
+        clearTimeout(timer);
+        timer = setTimeout(flush, AUTOSAVE_DEBOUNCE_MS);
+    }
+}
+
+// --------------------------------------------------------------------------- //
+// Promotion: "Save to server" on a browser-only file. Exposed to the Menu.
+// --------------------------------------------------------------------------- //
+export function saveToServer(localId: string) {
+    if (registry.has(localId)) return; // already server-backed
+    const file = fileStateCollection.getFile(localId);
+    if (!file) {
+        embedError('Cannot save to server: file not found');
+        return;
+    }
+    try {
+        setStatus(localId, 'saving');
+        const name = file.metadata?.name?.trim();
+        // Promotion is just a save of a file the host hasn't seen: no `id` yet, so we
+        // carry `tempId` (this localId) — the host creates and binds it back via `status`.
+        post({
+            event: 'save',
+            tempId: localId,
+            data: buildGPX(file, []),
+            name: name ? `${name}.gpx` : 'untitled.gpx',
+        });
+    } catch (e) {
+        setStatus(localId, 'error');
+        embedError('Failed to save to server', e);
+    }
+}
+
+export function isServerBacked(localId: string): boolean {
+    return registry.has(localId);
+}
+
+// --------------------------------------------------------------------------- //
+// Inbound dispatch.
+// --------------------------------------------------------------------------- //
+async function handleAction(m: Record<string, any>) {
+    try {
+        switch (m.action) {
+            case 'load': {
+                // Single inbound-open action (multi-file): every loaded file is
+                // selected/activated — preferred UX over silently adding in the bg.
+                const localId = await applyIncoming(m.id, m.data, m.title);
+                if (localId) {
+                    // applyIncoming awaits the Dexie write, so the file is usually
+                    // already in fileStateCollection here. selectFileWhenLoaded()
+                    // subscribes and Svelte fires the callback *synchronously* when
+                    // the value is already present — which trips its own `unsubscribe`
+                    // TDZ (ReferenceError). Select directly in that case; only defer
+                    // when the file genuinely hasn't propagated yet.
+                    if (fileStateCollection.getFile(localId)) {
+                        selection.selectFile(localId);
+                    } else {
+                        selection.selectFileWhenLoaded(localId);
+                    }
+                }
+                post({ event: 'load', id: m.id });
+                break;
+            }
+            case 'merge':
+                // Whole-file LWW replace. boundsManager only auto-fits *new* files,
+                // so replacing an already-open file preserves the map viewport.
+                // fromMerge=true → warn if this discards unsaved local edits.
+                await applyIncoming(m.id, m.data, m.title, true);
+                break;
+            case 'remove':
+                await removeIncoming(m.id);
+                break;
+            case 'status': {
+                // Host's ack of a write outcome (draw.io-style single status channel).
+                // `ok:true` carries the new version; `ok:false` carries a message.
+                // On a promotion ack the host also sends `tempId` (no binding exists yet),
+                // so we key on that and adopt the binding here — folding in the old assignId.
+                const localId = m.tempId ?? localByHost().get(m.id);
+                if (!localId) {
+                    // An id-less status is a *global* host notice, not a per-file
+                    // ack (e.g. the bridge lost its backend connection). There's
+                    // no badge to set — surface it as one sticky, de-duplicated
+                    // toast (the host re-sends this on every poll while down).
+                    if (!m.ok && m.message) embedNotice('embed:host-status', m.message);
+                    break;
+                }
+                if (m.ok) {
+                    registry.set(localId, { hostId: m.id, version: m.version });
+                    persistRegistry();
+                    setStatus(localId, 'saved');
+                } else {
+                    // Badge keeps the per-file error state; the popup surfaces it loudly.
+                    setStatus(localId, 'error', m.message);
+                    embedError('Host rejected save', m.message);
+                }
+                break;
+            }
+        }
+    } catch (e) {
+        embedError(`Failed to handle "${m.action}" from host`, e);
+    }
+}
+
+// --------------------------------------------------------------------------- //
+// Bootstrap.
+// --------------------------------------------------------------------------- //
+let started = false;
+
+export function isEmbedded(): boolean {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('embedded') === '1';
+}
+
+export async function initEmbed() {
+    if (started || !isEmbedded()) return;
+    started = true;
+
+    // Dexie persists by design (browser-local files stay until promoted). Restore
+    // the localId↔hostId registry so server-backed files keep their host binding
+    // across a reload — must run before we accept inbound messages so re-`load`s
+    // re-attach to the existing gpx-N instead of creating duplicates.
+    await restoreRegistry();
+
+    onLocalCommit(onCommit);
+
+    window.addEventListener('message', (e) => {
+        const m = e.data;
+        if (!m || typeof m !== 'object' || !m.action) return; // ignore noise
+        if (!originAllowed(e.origin)) return;
+        if (hostOrigin === null) hostOrigin = e.origin; // pin host origin (TOFU)
+        else if (e.origin !== hostOrigin) return;
+        handleAction(m as Record<string, any>);
+    });
+
+    // Re-announce our server-backed files (hostId + last-known version) so the
+    // host can reconcile each against the server and push down any newer copy
+    // before the user edits — closing the reload race where a stale Dexie copy
+    // could autosave over a newer server version. Only hostId crosses the
+    // boundary, never the gpx-N localId.
+    post({
+        event: 'init',
+        files: [...registry].map(([, e]) => ({ id: e.hostId, version: e.version })),
+    });
+}

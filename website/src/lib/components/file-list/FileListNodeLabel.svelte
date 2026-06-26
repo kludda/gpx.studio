@@ -41,6 +41,10 @@
     import { fileStateCollection } from '$lib/logic/file-state';
     import { waypointPopup } from '$lib/components/map/gpx-layer/gpx-layer-popup';
     import { allowedPastes } from './sortable-file-list';
+    import SyncStatusBadge from '$lib/embed/SyncStatusBadge.svelte';
+    import { isEmbedded } from '$lib/embed/embed';
+
+    let embedded = isEmbedded();
 
     let {
         node,
@@ -199,6 +203,9 @@
                 >
                     {label}
                 </span>
+                {#if embedded && item.level === ListLevel.FILE}
+                    <SyncStatusBadge fileId={item.getFileId()} />
+                {/if}
                 {#if hidden}
                     <EyeOff
                         size="10"

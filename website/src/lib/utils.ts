@@ -121,7 +121,7 @@ export function getElevation(
     };
 
     let promises = uniqueTiles.map((tile) =>
-        fetch(`https://tiles.gpx.studio/mapterhorn/${ELEVATION_ZOOM}/${tile[0]}/${tile[1]}.webp`, {
+        fetch(`${import.meta.env.VITE_ELEVATION_TILES_URL || 'https://tiles.gpx.studio/mapterhorn'}/${ELEVATION_ZOOM}/${tile[0]}/${tile[1]}.webp`, { // [embed] env-configurable base incl. mirror path; default = upstream mirror
             cache: 'force-cache',
         })
             .then((response) => response.blob())

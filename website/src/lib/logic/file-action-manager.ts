@@ -15,6 +15,19 @@ import { selection } from '$lib/logic/selection';
 
 const MAX_PATCHES = 100;
 
+// Embed mode tap point: a single listener notified after each local commit has
+// been persisted. Used by `$lib/embed` to autosave server-backed files back to
+// the host. Null (and inert) when not embedded — standalone behaviour unchanged.
+type CommitListener = (
+    updatedFileIds: string[],
+    deletedFileIds: string[],
+    newFiles: ReadonlyMap<string, GPXFile>
+) => void;
+let commitListener: CommitListener | null = null;
+export function onLocalCommit(fn: CommitListener | null) {
+    commitListener = fn;
+}
+
 export class FileActionManager {
     private _db: Database;
     private _files: Map<string, GPXFile>;
@@ -152,7 +165,7 @@ export class FileActionManager {
         selection.updateFiles(updatedFiles, deletedFileIds);
 
         // @ts-ignore
-        return this._db.transaction('rw', this._db.fileids, this._db.files, async () => {
+        const tx = this._db.transaction('rw', this._db.fileids, this._db.files, async () => {
             if (updatedFileIds.length > 0) {
                 await this._db.fileids.bulkPut(updatedFileIds, updatedFileIds);
                 await this._db.files.bulkPut(updatedFiles, updatedFileIds);
@@ -162,6 +175,10 @@ export class FileActionManager {
                 await this._db.files.bulkDelete(deletedFileIds);
             }
         });
+        if (commitListener) {
+            tx.then(() => commitListener?.(updatedFileIds, deletedFileIds, newFiles));
+        }
+        return tx;
     }
 
     applyGlobal(callback: (files: Map<string, GPXFile>) => void) {
@@ -251,3 +268,16 @@ function getChangedFileIds(patch: Patch[]): string[] {
 }
 
 export const fileActionManager = new FileActionManager(db);
+
+// Embed mode bootstrap. Kept here (not in the app route) so the route file stays
+// identical to upstream. The commit tap above (`onLocalCommit`) exists by the
+// time `$lib/embed` initialises. A dynamic import is used so this module finishes
+// evaluating first — `$lib/embed` imports `onLocalCommit` from here, so a static
+// import would form an init-order cycle. `initEmbed` self-guards too, but gating
+// on the `embedded` flag avoids running it (and waiting on the chunk) standalone.
+if (
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('embedded') === '1'
+) {
+    import('$lib/embed/embed').then((m) => m.initEmbed());
+}
